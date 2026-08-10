@@ -348,6 +348,7 @@
     import * as THREE from "three";
     import { OrbitControls } from "three/addons/controls/OrbitControls.js";
     import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+    import { DRACOLoader } from "three/addons/loaders/DRACOLoader.js";
     import { HandLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.34/vision_bundle.mjs";
 
     const IS_MOBILE = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || innerWidth < 820;
@@ -421,7 +422,10 @@
     let modelObject = null;
     let modelReady = false;
 
+    const dracoLoader = new DRACOLoader();
+    dracoLoader.setDecoderPath("https://www.gstatic.com/draco/versioned/decoders/1.5.7/");
     const loader = new GLTFLoader();
+    loader.setDRACOLoader(dracoLoader);
     loader.load("neuron1.glb", gltf => {
       modelObject = gltf.scene;
       modelObject.updateMatrixWorld(true);
