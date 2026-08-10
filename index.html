@@ -25,15 +25,71 @@ const MOBILE=/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)||innerWidth<8
 const canvas=document.querySelector("#scene"),video=document.querySelector("#video"),dbg=document.querySelector("#debug"),ctx=dbg.getContext("2d"),status=document.querySelector("#status"),loading=document.querySelector("#loading"),start=document.querySelector("#start"),exit=document.querySelector("#exit"),flip=document.querySelector("#flip"),sheet=document.querySelector("#sheet");
 const say=(t,k="")=>{status.textContent=t;status.className="status "+k};document.querySelector("#conn").onclick=document.querySelector("#conn2").onclick=()=>sheet.classList.add("open");document.querySelector("#close").onclick=()=>sheet.classList.remove("open");sheet.onclick=e=>{if(e.target===sheet)sheet.classList.remove("open")};
 const renderer=new THREE.WebGLRenderer({canvas,alpha:true,antialias:!MOBILE,powerPreference:"high-performance"});renderer.setPixelRatio(Math.min(devicePixelRatio||1,MOBILE?1.2:2));renderer.outputColorSpace=THREE.SRGBColorSpace;const scene=new THREE.Scene();scene.background=new THREE.Color("#07110f");const camera=new THREE.PerspectiveCamera(38,1,.05,100);camera.position.set(0,.15,7.4);const controls=new OrbitControls(camera,renderer.domElement);controls.enableDamping=true;controls.enablePan=false;controls.autoRotate=true;controls.autoRotateSpeed=.42;scene.add(new THREE.HemisphereLight(0xeafff4,0x13231d,2.3));let l=new THREE.DirectionalLight(0xffffff,3);l.position.set(4,6,7);scene.add(l);l=new THREE.DirectionalLight(0x8fffc8,1.5);l.position.set(-5,1,4);scene.add(l);
-const root=new THREE.Group();scene.add(root);let ready=false;const draco=new DRACOLoader();draco.setDecoderPath("https://www.gstatic.com/draco/versioned/decoders/1.5.7/");const gltf=new GLTFLoader();gltf.setDRACOLoader(draco);gltf.load("neuron1.glb",g=>{const o=g.scene;o.updateMatrixWorld(true);const b=new THREE.Box3().setFromObject(o),c=b.getCenter(new THREE.Vector3()),s=b.getSize(new THREE.Vector3()),m=Math.max(s.x,s.y,s.z)||1;o.position.sub(c);o.scale.setScalar(4.6/m);o.traverse(x=>{if(x.isMesh&&x.material){x.material.side=THREE.DoubleSide;x.material.needsUpdate=true}});root.add(o);root.rotation.set(-.08,.28,-.04);ready=true;loading.hidden=true;say("Neurônio H01 carregado · inicie o AR","ok")},undefined,e=>{console.error(e);loading.hidden=true;say("Erro ao carregar neuron1.glb","err")});
+
+const root=new THREE.Group();scene.add(root);const galleryPosition=new THREE.Vector3();let ready=false;
+
+function estimateSomaPivot(object){
+  object.updateMatrixWorld(true);
+  const box=new THREE.Box3().setFromObject(object),size=box.getSize(new THREE.Vector3());
+  let total=0;
+  object.traverse(n=>{if(n.isMesh&&n.geometry?.attributes?.position)total+=n.geometry.attributes.position.count});
+  if(!total)return box.getCenter(new THREE.Vector3());
+  const maxSamples=120000,stride=Math.max(1,Math.ceil(total/maxSamples)),pts=[],v=new THREE.Vector3();
+  let seen=0;
+  object.traverse(n=>{
+    if(!n.isMesh||!n.geometry?.attributes?.position)return;
+    const pos=n.geometry.attributes.position;
+    for(let j=0;j<pos.count;j++,seen++){
+      if(seen%stride)continue;
+      v.fromBufferAttribute(pos,j).applyMatrix4(n.matrixWorld);
+      pts.push(v.x,v.y,v.z);
+    }
+  });
+  if(!pts.length)return box.getCenter(new THREE.Vector3());
+  const bins=36,counts=new Uint32Array(bins*bins*bins),sx=size.x||1,sy=size.y||1,sz=size.z||1;
+  const voxel=(x,y,z)=>{
+    const ix=THREE.MathUtils.clamp(Math.floor((x-box.min.x)/sx*bins),0,bins-1),iy=THREE.MathUtils.clamp(Math.floor((y-box.min.y)/sy*bins),0,bins-1),iz=THREE.MathUtils.clamp(Math.floor((z-box.min.z)/sz*bins),0,bins-1);
+    return [ix,iy,iz,(ix*bins+iy)*bins+iz];
+  };
+  for(let k=0;k<pts.length;k+=3)counts[voxel(pts[k],pts[k+1],pts[k+2])[3]]++;
+  let bestKey=0,bestScore=-1;
+  for(let ix=0;ix<bins;ix++)for(let iy=0;iy<bins;iy++)for(let iz=0;iz<bins;iz++){
+    let score=0;
+    for(let dx=-1;dx<=1;dx++)for(let dy=-1;dy<=1;dy++)for(let dz=-1;dz<=1;dz++){
+      const x=ix+dx,y=iy+dy,z=iz+dz;if(x>=0&&x<bins&&y>=0&&y<bins&&z>=0&&z<bins)score+=counts[(x*bins+y)*bins+z];
+    }
+    if(score>bestScore){bestScore=score;bestKey=(ix*bins+iy)*bins+iz}
+  }
+  const bix=Math.floor(bestKey/(bins*bins)),rem=bestKey-bix*bins*bins,biy=Math.floor(rem/bins),biz=rem-biy*bins;
+  let ax=0,ay=0,az=0,n=0;
+  for(let k=0;k<pts.length;k+=3){const [ix,iy,iz]=voxel(pts[k],pts[k+1],pts[k+2]);if(Math.abs(ix-bix)<=1&&Math.abs(iy-biy)<=1&&Math.abs(iz-biz)<=1){ax+=pts[k];ay+=pts[k+1];az+=pts[k+2];n++}}
+  return n?new THREE.Vector3(ax/n,ay/n,az/n):box.getCenter(new THREE.Vector3());
+}
+
+const draco=new DRACOLoader();draco.setDecoderPath("https://www.gstatic.com/draco/versioned/decoders/1.5.7/");const gltf=new GLTFLoader();gltf.setDRACOLoader(draco);
+gltf.load("neuron1.glb",g=>{
+  const o=g.scene;o.updateMatrixWorld(true);
+  const b=new THREE.Box3().setFromObject(o),c=b.getCenter(new THREE.Vector3()),s=b.getSize(new THREE.Vector3()),m=Math.max(s.x,s.y,s.z)||1;
+  const soma=estimateSomaPivot(o),k=4.6/m,pivot=new THREE.Group();
+  pivot.add(o);root.add(pivot);
+  o.position.addScaledVector(soma,-1);
+  pivot.scale.setScalar(k);
+  o.traverse(x=>{if(x.isMesh&&x.material){x.material.side=THREE.DoubleSide;x.material.needsUpdate=true}});
+  root.rotation.set(-.08,.28,-.04);
+  galleryPosition.copy(c).sub(soma).multiplyScalar(k).applyQuaternion(root.quaternion).multiplyScalar(-1);
+  root.position.copy(galleryPosition);
+  console.info("NeuroAR soma pivot",soma.toArray());
+  ready=true;loading.hidden=true;say("Neurônio H01 carregado · inicie o AR","ok");
+},undefined,e=>{console.error(e);loading.hidden=true;say("Erro ao carregar neuron1.glb","err")});
+
 let ar=false,stream=null,facing="user",tracker=null,lastVT=-1,lastDet=0,lastHand=0;const ray=new THREE.Raycaster(),plane=new THREE.Plane(new THREE.Vector3(0,0,1),0),pTarget=new THREE.Vector3(),qTarget=new THREE.Quaternion(),sTarget=new THREE.Vector3(1.15,1.15,1.15),tmp=new THREE.Vector3(),eul=new THREE.Euler(0,0,0,"XYZ");
 function world(x,y){ray.setFromCamera(new THREE.Vector2(x*2-1,1-y*2),camera);if(!ray.ray.intersectPlane(plane,tmp))tmp.set(0,0,0);return tmp}
 async function makeTracker(){if(tracker)return tracker;const vision=await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.34/wasm");tracker=await HandLandmarker.createFromOptions(vision,{baseOptions:{modelAssetPath:"https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",delegate:"CPU"},runningMode:"VIDEO",numHands:1,minHandDetectionConfidence:.2,minHandPresenceConfidence:.2,minTrackingConfidence:.2});return tracker}
 async function cam(){if(!window.isSecureContext)throw Error("A câmera exige HTTPS.");if(!navigator.mediaDevices?.getUserMedia)throw Error("Câmera não suportada neste navegador.");if(stream)stream.getTracks().forEach(t=>t.stop());const vc=MOBILE?{facingMode:{ideal:facing},width:{ideal:640},height:{ideal:480},frameRate:{ideal:24,max:30}}:{facingMode:{ideal:facing},width:{ideal:960},height:{ideal:720}};stream=await navigator.mediaDevices.getUserMedia({audio:false,video:vc});video.srcObject=stream;await video.play();video.classList.add("on");video.classList.toggle("mirror",facing==="user")}
-async function begin(){if(!ready){say("Aguarde o neurônio carregar.");return}start.disabled=true;loading.hidden=false;loading.textContent="Iniciando câmera e rastreamento…";try{await cam();await makeTracker();ar=true;document.body.classList.add("ar");scene.background=null;controls.enabled=false;controls.autoRotate=false;root.position.set(0,.15,0);root.scale.setScalar(1.15);sTarget.setScalar(1.15);pTarget.copy(root.position);qTarget.copy(root.quaternion);lastVT=-1;lastHand=0;say("Abra a palma inteira diante da câmera","ok")}catch(e){console.error(e);say(e.message||"Falha ao iniciar AR","err")}finally{loading.hidden=true;start.disabled=false}}
-function end(){ar=false;document.body.classList.remove("ar");if(stream)stream.getTracks().forEach(t=>t.stop());stream=null;video.srcObject=null;video.classList.remove("on","mirror");scene.background=new THREE.Color("#07110f");controls.enabled=true;controls.autoRotate=true;root.position.set(0,0,0);root.scale.setScalar(1);root.rotation.set(-.08,.28,-.04);say("Galeria 3D · inicie o AR","ok")}
+async function begin(){if(!ready){say("Aguarde o neurônio carregar.");return}start.disabled=true;loading.hidden=false;loading.textContent="Iniciando câmera e rastreamento…";try{await cam();await makeTracker();ar=true;document.body.classList.add("ar");scene.background=null;controls.enabled=false;controls.autoRotate=false;root.position.set(0,0,0);root.scale.setScalar(1.15);sTarget.setScalar(1.15);pTarget.copy(root.position);qTarget.copy(root.quaternion);lastVT=-1;lastHand=0;say("Abra a palma inteira diante da câmera","ok")}catch(e){console.error(e);say(e.message||"Falha ao iniciar AR","err")}finally{loading.hidden=true;start.disabled=false}}
+function end(){ar=false;document.body.classList.remove("ar");if(stream)stream.getTracks().forEach(t=>t.stop());stream=null;video.srcObject=null;video.classList.remove("on","mirror");scene.background=new THREE.Color("#07110f");controls.enabled=true;controls.autoRotate=true;root.position.copy(galleryPosition);root.scale.setScalar(1);root.rotation.set(-.08,.28,-.04);say("Galeria 3D · inicie o AR","ok")}
 async function flipCam(){facing=facing==="user"?"environment":"user";if(ar){try{await cam();lastVT=-1;say("Abra a palma inteira diante da câmera","ok")}catch(e){say("Não foi possível trocar a câmera","err")}}}start.onclick=begin;exit.onclick=end;flip.onclick=flipCam;
-const d=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);function handUpdate(raw){const h=raw.map(p=>({x:facing==="user"?1-p.x:p.x,y:p.y,z:p.z})),w=h[0],th=h[4],it=h[8],i=h[5],m=h[9],pk=h[17],cx=(w.x+i.x+m.x+pk.x)/4,cy=(w.y+i.y+m.y+pk.y)/4,pw=Math.max(.02,d(i,pk)),anchorX=cx-.9*pw,anchorY=cy+.03*pw;world(anchorX,anchorY);pTarget.set(tmp.x,tmp.y+.22,0);const roll=-Math.atan2(i.y-pk.y,i.x-pk.x),yaw=THREE.MathUtils.clamp((pk.z-i.z)*4.4,-.9,.9),pitch=THREE.MathUtils.clamp((w.z-m.z)*3.6,-.85,.85);eul.set(pitch,yaw,roll);qTarget.setFromEuler(eul);const pr=THREE.MathUtils.clamp(d(th,it)/pw,.12,1.4),gs=THREE.MathUtils.mapLinear(pr,.12,1.05,.82,1.28),ps=THREE.MathUtils.clamp(pw/.18,.78,1.55),sc=THREE.MathUtils.clamp(1.15*ps*gs,.8,2.0);sTarget.setScalar(sc);lastHand=performance.now();say(pr<.45?"Mão detectada · pinça controla o tamanho":"Mão detectada · neurônio ancorado na palma","ok");if(DEBUG){ctx.clearRect(0,0,dbg.clientWidth,dbg.clientHeight);ctx.fillStyle="#63e6a8";h.forEach(p=>{ctx.beginPath();ctx.arc(p.x*dbg.clientWidth,p.y*dbg.clientHeight,4,0,7);ctx.fill()})}}
+const d=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);function handUpdate(raw){const h=raw.map(p=>({x:facing==="user"?1-p.x:p.x,y:p.y,z:p.z})),w=h[0],th=h[4],it=h[8],i=h[5],m=h[9],r=h[13],pk=h[17],cx=(w.x+i.x+m.x+r.x+pk.x)/5,cy=(w.y+i.y+m.y+r.y+pk.y)/5,pw=Math.max(.02,d(i,pk));world(cx,cy);pTarget.set(tmp.x,tmp.y,0);const roll=-Math.atan2(i.y-pk.y,i.x-pk.x),yaw=THREE.MathUtils.clamp((pk.z-i.z)*4.4,-.9,.9),pitch=THREE.MathUtils.clamp((w.z-m.z)*3.6,-.85,.85);eul.set(pitch,yaw,roll);qTarget.setFromEuler(eul);const pr=THREE.MathUtils.clamp(d(th,it)/pw,.12,1.4),gs=THREE.MathUtils.mapLinear(pr,.12,1.05,.82,1.28),ps=THREE.MathUtils.clamp(pw/.18,.78,1.55),sc=THREE.MathUtils.clamp(1.15*ps*gs,.8,2.0);sTarget.setScalar(sc);lastHand=performance.now();say(pr<.45?"Mão detectada · pinça controla o tamanho":"Mão detectada · soma ancorado na palma","ok");if(DEBUG){ctx.clearRect(0,0,dbg.clientWidth,dbg.clientHeight);ctx.fillStyle="#63e6a8";h.forEach(p=>{ctx.beginPath();ctx.arc(p.x*dbg.clientWidth,p.y*dbg.clientHeight,4,0,7);ctx.fill()})}}
 function detect(now){if(!ar||!tracker||video.readyState<2)return;if(now-lastDet<(MOBILE?120:90))return;if(video.currentTime===lastVT)return;lastDet=now;lastVT=video.currentTime;try{const r=tracker.detectForVideo(video,now),h=r?.landmarks?.[0];if(h)handUpdate(h);else if(now-lastHand>900)say("Mão não detectada · mostre a palma inteira e use boa iluminação")}catch(e){console.warn(e);say("Falha no rastreamento · recarregue a página","err")}}
 function resize(){const el=document.querySelector("#exp"),w=el.clientWidth,h=el.clientHeight;renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix();const pr=Math.min(devicePixelRatio||1,MOBILE?1.2:2);dbg.width=Math.round(w*pr);dbg.height=Math.round(h*pr);dbg.style.width=w+"px";dbg.style.height=h+"px";ctx.setTransform(pr,0,0,pr,0,0)}addEventListener("resize",resize);resize();function loop(now){requestAnimationFrame(loop);controls.update();if(ar){detect(now);root.position.lerp(pTarget,.2);root.quaternion.slerp(qTarget,.18);root.scale.lerp(sTarget,.2)}renderer.render(scene,camera)}requestAnimationFrame(loop);
 </script>
