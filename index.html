@@ -12,9 +12,9 @@
 <section class="hero" id="exp"><video id="video" playsinline webkit-playsinline muted autoplay></video><canvas id="scene"></canvas><canvas id="debug"></canvas><div class="scrim"></div>
 <header class="top"><div class="brand">Neuro<b>AR</b></div><div class="nav"><button class="btn" id="conn">Conexões</button><a class="btn" href="#science">Sobre</a></div></header>
 <div class="intro"><h1>Segure um neurônio humano na sua mão.</h1><p>Explore em 3D um neurônio real reconstruído do conjunto H01 do córtex temporal humano. No modo AR ele acompanha sua mão.</p><div class="actions"><button class="btn primary" id="start">Iniciar experiência AR</button><button class="btn" id="conn2">Ver conexões</button></div><p class="micro">A câmera é processada localmente no navegador. Nenhum vídeo é enviado por esta página.</p></div>
-<div class="status" id="status">Carregando neurônio real…</div><div class="arctl"><button class="btn" id="flip">Trocar câmera</button><button class="btn" id="exit">Sair do AR</button></div><div class="loading" id="loading">Carregando neuron1.glb…</div></section>
+<div class="status" id="status">Carregando neurônio real…</div><div class="arctl"><button class="btn" id="flip">Trocar câmera</button><button class="btn" id="exit">Sair do AR</button></div><div class="loading" id="loading">Carregando H01 3M Draco…</div></section>
 <section class="science" id="science"><div><h2>Um fragmento de córtex humano reconstruído em escala nanométrica.</h2><p>O H01 reúne uma reconstrução de aproximadamente 1 mm³ de córtex temporal humano e cerca de 150 milhões de sinapses.</p><div class="stats"><div class="card"><strong>≈1 mm³</strong>córtex temporal</div><div class="card"><strong>1,4 PB</strong>dados de imagem</div><div class="card"><strong>≈57 mil</strong>células</div><div class="card"><strong>≈150 mi</strong>sinapses</div></div><div class="sources"><a href="https://doi.org/10.1126/science.adk4858" target="_blank" rel="noopener">Science — Shapson-Coe et al., 2024</a><a href="https://h01-release.storage.googleapis.com/data.html" target="_blank" rel="noopener">H01 Released Data</a><a href="https://www.nih.gov/news-events/nih-research-matters/study-reveals-unseen-details-human-brain-structure" target="_blank" rel="noopener">NIH Research Matters</a><a href="https://www.eurekalert.org/news-releases/1043546" target="_blank" rel="noopener">EurekAlert / AAAS</a></div></div></section>
-<div class="sheetbg" id="sheet"><div class="sheet"><button class="btn close" id="close">×</button><h2>Conexões e sinapses</h2><img src="20240521-synapses.jpg" alt="Visualização de neurônio e fibras conectadas no H01"><p class="credit">Crédito: Google Research & Lichtman Lab, Harvard University; rendering by D. Berger, Harvard. Imagem divulgada pelo NIH Research Matters.</p><p>O conjunto H01 inclui anotações de sinapses e conectividade.</p><div class="note"><b>Precisão científica:</b> esta versão não desenha sinapses decorativas sobre o neuron1.glb. A camada 3D será adicionada apenas após mapear as coordenadas reais do mesmo segmento.</div></div></div>
+<div class="sheetbg" id="sheet"><div class="sheet"><button class="btn close" id="close">×</button><h2>Conexões e sinapses</h2><img src="20240521-synapses.jpg" alt="Visualização de neurônio e fibras conectadas no H01"><p class="credit">Crédito: Google Research & Lichtman Lab, Harvard University; rendering by D. Berger, Harvard. Imagem divulgada pelo NIH Research Matters.</p><p>O conjunto H01 inclui anotações de sinapses e conectividade.</p><div class="note"><b>Precisão científica:</b> esta versão usa o modelo H01 3M validado e comprimido por Draco. A camada 3D de sinapses será adicionada apenas após mapear as coordenadas reais do mesmo segmento.</div></div></div>
 <script type="module">
 import * as THREE from "three";
 import {OrbitControls} from "three/addons/controls/OrbitControls.js";
@@ -66,8 +66,9 @@ function estimateSomaPivot(object){
   return n?new THREE.Vector3(ax/n,ay/n,az/n):box.getCenter(new THREE.Vector3());
 }
 
-const draco=new DRACOLoader();draco.setDecoderPath("https://www.gstatic.com/draco/versioned/decoders/1.5.7/");const gltf=new GLTFLoader();gltf.setDRACOLoader(draco);
-gltf.load("neuron1.glb",g=>{
+const draco=new DRACOLoader();draco.setDecoderPath("https://www.gstatic.com/draco/versioned/decoders/1.5.7/");draco.preload();const gltf=new GLTFLoader();gltf.setDRACOLoader(draco);
+const modelLoadStarted=performance.now();
+gltf.load("H01_L5_3M_DRACO.glb",g=>{
   const o=g.scene;o.updateMatrixWorld(true);
   const b=new THREE.Box3().setFromObject(o),c=b.getCenter(new THREE.Vector3()),s=b.getSize(new THREE.Vector3()),m=Math.max(s.x,s.y,s.z)||1;
   const soma=estimateSomaPivot(o),k=4.6/m,pivot=new THREE.Group();
@@ -79,8 +80,9 @@ gltf.load("neuron1.glb",g=>{
   galleryPosition.copy(c).sub(soma).multiplyScalar(k).applyQuaternion(root.quaternion).multiplyScalar(-1);
   root.position.copy(galleryPosition);
   console.info("NeuroAR soma pivot",soma.toArray());
-  ready=true;loading.hidden=true;say("Neurônio H01 carregado · inicie o AR","ok");
-},undefined,e=>{console.error(e);loading.hidden=true;say("Erro ao carregar neuron1.glb","err")});
+  console.info("NeuroAR Draco model load ms",Math.round(performance.now()-modelLoadStarted));
+  ready=true;loading.hidden=true;say("Neurônio H01 3M Draco carregado · inicie o AR","ok");
+},undefined,e=>{console.error(e);loading.hidden=true;say("Erro ao carregar H01_L5_3M_DRACO.glb","err")});
 
 let ar=false,stream=null,facing="user",tracker=null,lastVT=-1,lastDet=0,lastHand=0;const ray=new THREE.Raycaster(),plane=new THREE.Plane(new THREE.Vector3(0,0,1),0),pTarget=new THREE.Vector3(),qTarget=new THREE.Quaternion(),sTarget=new THREE.Vector3(1.15,1.15,1.15),tmp=new THREE.Vector3(),eul=new THREE.Euler(0,0,0,"XYZ");
 function world(x,y){ray.setFromCamera(new THREE.Vector2(x*2-1,1-y*2),camera);if(!ray.ray.intersectPlane(plane,tmp))tmp.set(0,0,0);return tmp}
